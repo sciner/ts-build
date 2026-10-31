@@ -167,8 +167,16 @@ export class PathRewriter {
     }
 
     rewriteAll() {
+        return this.rewriteSince(0)
+    }
+
+    // rewrites the emitted files modified at or after the time (ms); 0 - all of them
+    rewriteSince(since_ms) {
         let changed = 0
         for (const file of this.emittedFiles()) {
+            if (since_ms > 0 && (statSync(file, { throwIfNoEntry: false })?.mtimeMs ?? 0) < since_ms) {
+                continue
+            }
             if (this.rewriteFile(file)) {
                 changed++
             }
