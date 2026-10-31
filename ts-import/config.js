@@ -83,8 +83,16 @@ export function pathAliases(config) {
     return aliases
 }
 
-// A TypeScript source is imported by its .js name; extensionless and directory imports
-// are allowed as with ts-node experimentalSpecifierResolution=node
+export function isDirectory(file) {
+    return statSync(file, { throwIfNoEntry: false })?.isDirectory() ?? false
+}
+
+// extensions tried for a path without one, a TypeScript source first
+const EXTENSIONS = ['.ts', '.js', '.mjs', '.json']
+
+// A TypeScript source is imported by its .js name. Extensionless and directory imports are
+// resolved as the former ts-node resolver did (node's --experimental-specifier-resolution=node):
+// emitted code has them, e.g. "../node_modules/pako" of the pako alias in www/js
 export function findSource(file) {
     if (file.endsWith('.js')) {
         const ts_file = file.slice(0, -3) + '.ts'
@@ -94,10 +102,35 @@ export function findSource(file) {
         if (isFile(ts_file)) return ts_file
     }
     if (isFile(file)) return file
-    for (const candidate of [file + '.ts', path.join(file, 'index.ts')]) {
-        if (isFile(candidate)) return candidate
+    const with_extension = findWithExtension(file)
+    if (with_extension) return with_extension
+    return isDirectory(file) ? findDirectoryEntry(file) : null
+}
+
+function findWithExtension(file) {
+    for (const ext of EXTENSIONS) {
+        if (isFile(file + ext)) return file + ext
     }
     return null
+}
+
+// a directory: the "main" of its package.json, otherwise its index
+function findDirectoryEntry(dir) {
+    const package_file = path.join(dir, 'package.json')
+    if (isFile(package_file)) {
+        let main = null
+        try {
+            main = JSON.parse(readFileSync(package_file, 'utf-8')).main ?? null
+        } catch {
+            // a broken package.json: the index is tried
+        }
+        if (typeof main === 'string') {
+            const entry = path.resolve(dir, main)
+            const found = isFile(entry) ? entry : findWithExtension(entry) ?? (isDirectory(entry) ? findWithExtension(path.join(entry, 'index')) : null)
+            if (found) return found
+        }
+    }
+    return findWithExtension(path.join(dir, 'index'))
 }
 
 export function matchAlias(aliases, specifier) {
