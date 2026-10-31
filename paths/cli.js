@@ -3,8 +3,7 @@
 // emitted files (see rewrite.js). With -w / --watch tsc watches and every emitted file is rewritten
 // as soon as tsc writes it
 import { spawn } from 'node:child_process'
-import { mkdirSync, watch } from 'node:fs'
-import { createRequire } from 'node:module'
+import { existsSync, mkdirSync, readFileSync, watch } from 'node:fs'
 import path from 'node:path'
 import { init, isDirectory, isEmitted, PathRewriter } from './rewrite.js'
 
@@ -16,9 +15,19 @@ if (isDirectory(tsconfig)) {
     tsconfig = path.join(tsconfig, 'tsconfig.json')
 }
 
+// tsc of the typescript package the current directory sees: by its package.json "bin", because
+// typescript 7 does not export ./bin/tsc (require.resolve('typescript/bin/tsc') fails)
 function tscBin() {
-    const require = createRequire(path.join(process.cwd(), 'package.json'))
-    return require.resolve('typescript/bin/tsc')
+    for (let dir = process.cwd(); ; dir = path.dirname(dir)) {
+        const package_file = path.join(dir, 'node_modules', 'typescript', 'package.json')
+        if (existsSync(package_file)) {
+            const bin = JSON.parse(readFileSync(package_file, 'utf-8')).bin
+            return path.join(path.dirname(package_file), (typeof bin === 'string' ? bin : bin?.tsc) ?? 'bin/tsc')
+        }
+        if (path.dirname(dir) === dir) {
+            throw new Error('ts-build-tsc: the typescript package is not installed')
+        }
+    }
 }
 
 await init
